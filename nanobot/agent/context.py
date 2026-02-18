@@ -162,22 +162,13 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+        """Build user message content with optional image paths."""
         if not media:
             return text
-        
-        images = []
-        for path in media:
-            p = Path(path)
-            mime, _ = mimetypes.guess_type(path)
-            if not p.is_file() or not mime or not mime.startswith("image/"):
-                continue
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
-        
-        if not images:
-            return text
-        return images + [{"type": "text", "text": text}]
+
+        # Append image paths to the text for MCP tools to use
+        image_paths = "\n".join(media)
+        return f"图片路径:\n{image_paths}\n\n{text}"
     
     def add_tool_result(
         self,
