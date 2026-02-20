@@ -538,10 +538,6 @@ class FeishuChannel(BaseChannel):
                     None, self._send_message_sync,
                     receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
                 )
-=======
-            else:
-                logger.debug(f"Feishu message sent to {msg.chat_id}")
->>>>>>> bc516c8 (feat: add Feishu image handling support)
 
         except Exception as e:
             logger.error(f"Error sending Feishu message: {e}")
