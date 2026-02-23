@@ -18,15 +18,16 @@ from nanobot.config.schema import FeishuConfig
 
 try:
     import lark_oapi as lark
+    from lark_oapi.api.contact.v3 import GetUserRequest
     from lark_oapi.api.im.v1 import (
         CreateFileRequest,
         CreateFileRequestBody,
         CreateImageRequest,
         CreateImageRequestBody,
-        CreateMessageRequest,
-        CreateMessageRequestBody,
         CreateMessageReactionRequest,
         CreateMessageReactionRequestBody,
+        CreateMessageRequest,
+        CreateMessageRequestBody,
         Emoji,
         GetFileRequest,
         GetMessageResourceRequest,
@@ -37,6 +38,7 @@ except ImportError:
     FEISHU_AVAILABLE = False
     lark = None
     Emoji = None
+    GetUserRequest = None
 
 # Message type display mapping
 MSG_TYPE_MAP = {
@@ -248,6 +250,7 @@ class FeishuChannel(BaseChannel):
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
+        self._user_name_cache: dict[str, str] = {}  # Cache for user names
         self._loop: asyncio.AbstractEventLoop | None = None
     
     async def start(self) -> None:
@@ -646,6 +649,44 @@ class FeishuChannel(BaseChannel):
         """
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
+
+    async def _get_user_name(self, open_id: str) -> str:
+        """Get user name by open_id from Feishu contact API (with caching)."""
+        if not open_id:
+            return "Unknown"
+
+        # Check cache first
+        if open_id in self._user_name_cache:
+            return self._user_name_cache[open_id]
+
+        if not self._client or not FEISHU_AVAILABLE:
+            return "Unknown"
+
+        try:
+            request = (
+                GetUserRequest.builder()
+                .user_id(open_id)
+                .user_id_type("open_id")
+                .build()
+            )
+            response = self._client.contact.v3.user.get(request)
+
+            logger.info("GetUserResponse: success={}, data={}, code={}, msg={}", response.success(), response.data, response.code, response.msg)
+            if response.success() and response.data and response.data.user:
+                user = response.data.user
+                # Try name, then en_name, then fallback
+                name = user.name or user.en_name or "Unknown"
+                logger.info("Got user name for {}: {}", open_id, name)
+                self._user_name_cache[open_id] = name
+                return name
+            else:
+                logger.warning("Failed to get user name for {}: code={}, msg={}", open_id, response.code, response.msg)
+                self._user_name_cache[open_id] = "Unknown"
+                return "Unknown"
+        except Exception as e:
+            logger.warning("Error getting user name for {}: {}", open_id, e)
+            self._user_name_cache[open_id] = "Unknown"
+            return "Unknown"
     
     async def _on_message(self, data: "P2ImMessageReceiveV1") -> None:
         """Handle incoming message from Feishu."""
@@ -669,6 +710,7 @@ class FeishuChannel(BaseChannel):
                 return
 
             sender_id = sender.sender_id.open_id if sender.sender_id else "unknown"
+            sender_name = await self._get_user_name(sender_id)
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
@@ -715,6 +757,10 @@ class FeishuChannel(BaseChannel):
             if not content and not media_paths:
                 return
 
+            # Prepend sender name to content for group chats
+            if chat_type == "group":
+                content = f"{sender_name}: {content}"
+
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
@@ -726,6 +772,7 @@ class FeishuChannel(BaseChannel):
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "sender_name": sender_name,
                 }
             )
 
