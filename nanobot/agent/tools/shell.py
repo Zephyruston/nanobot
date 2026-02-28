@@ -3,10 +3,23 @@
 import asyncio
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+
+
+def _detect_shell() -> str:
+    """Detect preferred shell on the system. Prefers fish on Unix systems."""
+    #优先检查 fish
+    for shell in ["fish", "bash", "zsh", "sh"]:
+        shell_path = shutil.which(shell)
+        if shell_path:
+            return shell_path
+
+    #回退到系统默认的 sh
+    return "/bin/sh"
 
 
 class ExecTool(Tool):
@@ -37,6 +50,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.shell = _detect_shell()
     
     @property
     def name(self) -> str:
@@ -74,7 +88,9 @@ class ExecTool(Tool):
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
-            process = await asyncio.create_subprocess_shell(
+            process = await asyncio.create_subprocess_exec(
+                self.shell,
+                "-c",
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
