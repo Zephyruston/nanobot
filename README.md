@@ -420,14 +420,7 @@ Uses **WebSocket** long connection — no public IP required.
 **1. Create a Feishu bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
 - Create a new app → Enable **Bot** capability
-- **Permissions**: Add the following permissions:
-  - `im:message` - Send messages
-  - `im:message.p2p_msg:readonly` - Receive private messages
-  - `im:message.group_at_msg:readonly` - Receive group @messages
-  - `im:message.group_msg` - Receive group messages
-  - `im:chat:readonly` - Read chat info
-  - `contact:user.base:readonly` - Read user profile (for sender name in group chats)
-  - `contact:contact.base:readonly` - Read contact list
+- **Permissions**: Add `im:message` (send messages) and `im:message.p2p_msg:readonly` (receive messages)
 - **Events**: Add `im.message.receive_v1` (receive messages)
   - Select **Long Connection** mode (requires running nanobot first to establish connection)
 - **App availability**: Add the users/groups that need to access the bot
