@@ -283,6 +283,7 @@ class FeishuChannel(BaseChannel):
             logger.error("Feishu app_id and app_secret not configured")
             return
 
+        import lark_oapi as lark
         self._running = True
         self._loop = asyncio.get_running_loop()
 
@@ -343,6 +344,7 @@ class FeishuChannel(BaseChannel):
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
+        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
         try:
             request = CreateMessageReactionRequest.builder() \
                 .message_id(message_id) \
@@ -367,7 +369,7 @@ class FeishuChannel(BaseChannel):
 
         Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
         """
-        if not self._client or not Emoji:
+        if not self._client:
             return
 
         loop = asyncio.get_running_loop()
@@ -459,6 +461,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_image_sync(self, file_path: str) -> str | None:
         """Upload an image to Feishu and return the image_key."""
+        from lark_oapi.api.im.v1 import CreateImageRequest, CreateImageRequestBody
         try:
             with open(file_path, "rb") as f:
                 request = CreateImageRequest.builder() \
@@ -482,6 +485,7 @@ class FeishuChannel(BaseChannel):
 
     def _upload_file_sync(self, file_path: str) -> str | None:
         """Upload a file to Feishu and return the file_key."""
+        from lark_oapi.api.im.v1 import CreateFileRequest, CreateFileRequestBody
         ext = os.path.splitext(file_path)[1].lower()
         file_type = self._FILE_TYPE_MAP.get(ext, "stream")
         file_name = os.path.basename(file_path)
@@ -509,6 +513,7 @@ class FeishuChannel(BaseChannel):
 
     def _download_image_sync(self, message_id: str, image_key: str) -> tuple[bytes | None, str | None]:
         """Download an image from Feishu message by message_id and image_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
         try:
             request = GetMessageResourceRequest.builder() \
                 .message_id(message_id) \
@@ -533,6 +538,13 @@ class FeishuChannel(BaseChannel):
         self, message_id: str, file_key: str, resource_type: str = "file"
     ) -> tuple[bytes | None, str | None]:
         """Download a file/audio/media from a Feishu message by message_id and file_key."""
+        from lark_oapi.api.im.v1 import GetMessageResourceRequest
+
+        # Feishu API only accepts 'image' or 'file' as type parameter
+        # Convert 'audio' to 'file' for API compatibility
+        if resource_type == "audio":
+            resource_type = "file"
+
         try:
             request = (
                 GetMessageResourceRequest.builder()
@@ -601,6 +613,7 @@ class FeishuChannel(BaseChannel):
 
     def _send_message_sync(self, receive_id_type: str, receive_id: str, msg_type: str, content: str) -> bool:
         """Send a single message (text/image/file/interactive) synchronously."""
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
         try:
             request = CreateMessageRequest.builder() \
                 .receive_id_type(receive_id_type) \
