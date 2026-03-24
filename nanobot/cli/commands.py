@@ -294,7 +294,7 @@ def onboard(
 
     # Run interactive wizard if enabled
     if wizard:
-        from nanobot.cli.onboard_wizard import run_onboard
+        from nanobot.cli.onboard import run_onboard
 
         try:
             result = run_onboard(initial_config=config)
@@ -407,6 +407,14 @@ def _make_provider(config: Config):
         provider = AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
+            default_model=model,
+        )
+    # OpenVINO Model Server: direct OpenAI-compatible endpoint at /v3
+    elif provider_name == "ovms":
+        from nanobot.providers.custom_provider import CustomProvider
+        provider = CustomProvider(
+            api_key=p.api_key if p else "no-key",
+            api_base=config.get_api_base(model) or "http://localhost:8000/v3",
             default_model=model,
         )
     else:
@@ -611,6 +619,13 @@ def gateway(
             chat_id=chat_id,
             on_progress=_silent,
         )
+
+        # Keep a small tail of heartbeat history so the loop stays bounded
+        # without losing all short-term context between runs.
+        session = agent.sessions.get_or_create("heartbeat")
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
+
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
@@ -744,6 +759,7 @@ def agent(
                 on_stream_end=renderer.on_end,
             )
             if not renderer.streamed:
+                await renderer.close()
                 _print_agent_response(
                     response.content if response else "",
                     render_markdown=markdown,
@@ -865,9 +881,13 @@ def agent(
                         if turn_response:
                             content, meta = turn_response[0]
                             if content and not meta.get("_streamed"):
+                                if renderer:
+                                    await renderer.close()
                                 _print_agent_response(
                                     content, render_markdown=markdown, metadata=meta,
                                 )
+                        elif renderer and not renderer.streamed:
+                            await renderer.close()
                     except KeyboardInterrupt:
                         _restore_terminal()
                         console.print("\nGoodbye!")
@@ -984,36 +1004,33 @@ def _get_bridge_dir() -> Path:
 
 
 @channels_app.command("login")
-def channels_login():
-    """Link device via QR code."""
-    import shutil
-    import subprocess
-
+def channels_login(
+    channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+):
+    """Authenticate with a channel via QR code or other interactive login."""
+    from nanobot.channels.registry import discover_all
     from nanobot.config.loader import load_config
-    from nanobot.config.paths import get_runtime_subdir
 
     config = load_config()
-    bridge_dir = _get_bridge_dir()
+    channel_cfg = getattr(config.channels, channel_name, None) or {}
 
-    console.print(f"{__logo__} Starting bridge...")
-    console.print("Scan the QR code to connect.\n")
-
-    env = {**os.environ}
-    wa_cfg = getattr(config.channels, "whatsapp", None) or {}
-    bridge_token = wa_cfg.get("bridgeToken", "") if isinstance(wa_cfg, dict) else getattr(wa_cfg, "bridge_token", "")
-    if bridge_token:
-        env["BRIDGE_TOKEN"] = bridge_token
-    env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
-
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        console.print("[red]npm not found. Please install Node.js.[/red]")
+    # Validate channel exists
+    all_channels = discover_all()
+    if channel_name not in all_channels:
+        available = ", ".join(all_channels.keys())
+        console.print(f"[red]Unknown channel: {channel_name}[/red]  Available: {available}")
         raise typer.Exit(1)
 
-    try:
-        subprocess.run([npm_path, "start"], cwd=bridge_dir, check=True, env=env)
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Bridge failed: {e}[/red]")
+    console.print(f"{__logo__} {all_channels[channel_name].display_name} Login\n")
+
+    channel_cls = all_channels[channel_name]
+    channel = channel_cls(channel_cfg, bus=None)
+
+    success = asyncio.run(channel.login(force=force))
+
+    if not success:
+        raise typer.Exit(1)
 
 
 # ============================================================================
