@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -129,10 +130,11 @@ class ExecTool(Tool):
                 except asyncio.TimeoutError:
                     pass
                 finally:
-                    try:
-                        os.waitpid(process.pid, os.WNOHANG)
-                    except (ProcessLookupError, ChildProcessError) as e:
-                        logger.debug("Process already reaped or not found: {}", e)
+                    if sys.platform != "win32":
+                        try:
+                            os.waitpid(process.pid, os.WNOHANG)
+                        except (ProcessLookupError, ChildProcessError) as e:
+                            logger.debug("Process already reaped or not found: {}", e)
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
             output_parts = []
